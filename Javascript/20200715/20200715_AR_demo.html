@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>AR</title>
+<script src="aframe-master.js"></script>
+<script src="aframe-ar.js"></script>
+<script>
+// ボックスを配置
+const init = () => {
+    setObject("box");
+}
+
+// オブジェクトの形状変更
+const setObject = shape => {
+    const object1 = document.getElementById("object1");
+    const object2 = document.getElementById("object2");
+
+    object1.object3D.rotation.set(0,0,0);
+    object2.object3D.rotation.set(0,0,0);
+
+    if ( shape == "box" ) {
+        // ボックス
+        const param = {
+            primitive: "box",
+            width: 1,
+            height: 0.5,
+            depth: 1
+        };
+
+        object1.setAttribute("geometry", param);
+        object2.setAttribute("geometry", param);
+
+        object1.object3D.position.set(0,0,0);
+        object2.object3D.position.set(0,0.5,0);
+    } else if (shape == "cylinder" ) {
+        // コイン(円柱)
+        const param = {
+            primitive: "cylinder",
+            radius: 0.5,
+            height: 0.1,
+        };
+
+        object1.setAttribute("geometry", param);
+        object2.setAttribute("geometry", param);
+
+        object1.object3D.position.set(0,0,0);
+        object2.object3D.position.set(0,0,0.1);
+
+        object1.object3D.rotation.set(Math.PI/2,0,0);
+        object2.object3D.rotation.set(Math.PI/2,0,0);
+    } else if (shape == "sphere") {
+        // ボール(球体
+        const param1 = {
+            primitive: "sphere",
+            radius: 0.5,
+            phiStart: 0,
+            phiLength: 180
+        };
+        const param2 = {
+            primitive: "sphere",
+            radius: 0.5,
+            phiStart: 0,
+            phiLength: 180
+        };
+        object1.setAttribute("geometry", param1);
+        object2.setAttribute("geometry", param2);
+
+        object1.object3D.position.set(0,0,0);
+        object2.object3D.position.set(0,0,0);
+    }
+    setMaterial();
+}
+
+// オブジェクトのマテリアルを変更
+const setMaterial = () => {
+    const object1 = document.getElementById("object1");
+    const object2 = document.getElementById("object2");
+
+    let param1 = { color: "#FF0000", transparent: false, opacity: 1 };
+    let param2 = { color: "#0000FF", transparent: false, opacity: 1 };
+
+    if (document.getElementById("transparent").checked) {
+        // 半透明
+        param1 = { color: "#FF0000", transparent: true, opacity: 0.5 };
+        param2 = { color: "#0000FF", transparent: true, opacity: 0.5 };
+    }
+
+    object1.setAttribute("material", param1);
+    object2.setAttribute("material", param2);
+}
+
+const setAnimation = () => {
+    // オブジェクトを取得
+    const object = document.getElementById("object");
+
+    // オブジェクトのアニメーション
+    object.object3D.positions.set(0, 0.5, 0);
+    object.object3D.rotation.set(0,0,0);
+    object.object3D.scale.set(1, 1, 1);
+
+    let animationType = "fixed";
+    if ( document.getElementById("rotate").checked) {
+        animationType = "rotate";
+    }
+    if ( document.getElementById("updown").checked) {
+        animationType = "updown";
+    }
+    if ( document.getElementById("scale").checked) {
+        animationType = "scale";
+    }
+
+    // Y軸を中心に回転
+    if (animationType == "rotate") {
+        object.setAttribute("animation", {
+            property: "rotation",
+            from: "0 0 0",
+            to: "0 360 0",
+            dir: "normal",
+            dur: 2000,
+            loop: true,
+            easing: "linear"
+        });
+    }
+    // 上下
+    else if (animationType == "updown") {
+        object.setAttribute("animation", {
+            property: "position",
+            from: "0 0 0",
+            to: "0 1 0",
+            dir: "alternate",
+            dur: 2000,
+            loop: true,
+            easing: "easeInOutQuad"
+        });
+    }
+    // 変形(拡大縮小)
+    else if ( animationType == "scale" ) {
+        object.setAttribute("animation", {
+            property: "scale",
+            from: "1 1 1",
+            to: "0.5 2 0.5",
+            dir: "alternate",
+            dur: 2000,
+            loop: true,
+            easing: "easeInOutQuad"
+        });
+    }
+    // 固定
+    else {
+        object.removeAttribute("animation");
+    }
+}
+</script>
+<style>
+form {
+    position: fixed;
+    top: 0px;
+    left: 0px;
+    z-index: 10;
+}
+</style>
+</head>
+<body onload="init()">
+<form>
+<input type="checkbox" id="transparent" onchange="setMaterial()">半透明
+<input type="button" value="ボックス" onclick="setObject('box')">
+<input type="button" value="コイン" onclick="setObject('cylinder')">
+<input type="button" value="ボール" onclick="setObject('sphere')">
+<input type="radio" name="anim" id="fixed" onchange="setAnimation()" checked>
+<label for="fixed">固定</label>
+<input type="radio" name="anim" id="rotate" onchange="setAnimation()">
+<label for="rotate">回転</label>
+<input type="radio" name="anim" id="updown" onchange="setAnimation()">
+<label for="updown">上下</label>
+<input type="radio" name="anim" id="scale" onchange="setAnimation()">
+<label for="scale">変形</label>
+</form>
+<a-scene embedded arjs vr-mode-ui="enabled: false">
+    <a-marker preset="hiro">
+        <a-entity id="object">
+            <a-entity id="object1"></a-entity>
+            <a-entity id="object2"></a-entity>
+        </a-entity>
+    </a-marker>
+    <a-entity camera></a-entity>
+</a-scene>
+</body>
+</html>

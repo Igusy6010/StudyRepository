@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>英文並び替え</title>
+<script>
+let qno;    // 問題番号
+
+// 英文データ
+const sentence = [["I have to do my homework.","私は宿題をしなければならない。"],
+    ["I am not very good at cooking.","私は料理があまり上手ではない。"],
+    ["May I have a piese of cake?","ケーキを一切れいただけますか?"],
+    ["I think it will begin to rain soon.","すぐに雨が振り始めると思う。"],
+    ["I looked for the book for an hour.","私はその本を1時間探した。"]]
+
+// 問題開始
+const init = () => {
+    shuffle(sentence);
+    qno = 0;
+    setQuestion();
+    document.getElementById("num").innerText = `${qno+1}/${sentence.length}`;
+}
+
+// 問題の表示
+const setQuestion = () => {
+    const question = `問${qno+1}) ${sentence[qno][1]}`; // 問題番号と日本語の文
+    document.getElementById("question").innerHTML = question;   // 問題表示エリアに表示する
+
+    // 選択欄、解答欄の作成
+    let words = sentence[qno][0].slice(0, sentence[qno][0].length-1).split(" ");    // 英文を英語に分割
+    shuffle(words);
+
+    // 単語表示エリアと並び替えエリアをクリア
+    document.getElementById("select").innerHTML = "";
+    document.getElementById("answer").innerHTML = "";
+
+    for ( let i = 0; i < words.length; i++ )
+    {
+        // 選択欄
+        const word = document.createElement("span");    // span要素を作成
+        word.innerText = words[i];
+        word.draggable = true;
+        word.ondragstart = dragWord;    // ドラッグしたらdragWord関数を実行
+        document.getElementById("select").appendChild(word);
+
+        // 解答欄
+        const answer = document.createElement("span");
+        answer.innerText = `(${i+1})`;  // (1) (2)・・・などと表示する
+        answer.ondragover = dragOverWord;
+        answer.ondragleave = dragLeaveWord;
+        answer.ondrop = dropWord;
+        answer.classList.add("reset");  // resetクラスを追加
+        document.getElementById("answer").appendChild(answer);
+    }
+
+    // 末尾(ピリオドなど)
+    const last = document.createElement("apan");
+    last.innerText = sentence[qno][0].slice(-1);
+    document.getElementById("answer").appendChild(last);
+    document.getElementById("next").disabled = true;
+}
+
+// 単語をドラッグ
+const dragWord = event => {
+    event.dataTransfer.setData("text", event.target.innerText); // ここの、event.target.innerTextはドラッグした単語を指す
+    event.target.classList.add("select");
+}
+
+// 単語を解答欄にドロップ
+const dropWord = event => {
+    event.preventDefault(); // 通常のドラッグの動作をキャンセル
+    event.target.innerText = event.dataTransfer.getData("text");
+    event.target.classList.remove("reset", "select");
+    event.target.classList.add("set");
+}
+
+// 解答欄に選択中のスタイルをセット
+const dragOverWord = event => {
+    event.preventDefault();
+    event.target.classList.add("select");
+}
+
+// 選択中のスタイルを解答欄からすべて削除
+const dragLeaveWord = event => {
+    setStyle(document.getElementById("answer").children, "remove","select");
+}
+
+// スタイルの一括変更
+const setStyle = (targetList, op, style1, style2) => {
+    // targetListの要素数だけ繰り返し
+    for ( const target of targetList )
+    {
+        if ( op == "add" )
+        {
+            target.classList.add(style1, style2);
+        }
+        if ( op == "remove")
+        {
+            target.classList.remove(style1, style2);
+        }
+    }
+}
+
+// 配列の要素をシャッフル
+const shuffle = array => {
+    for (let i = array.length-1; i > 0; i--)
+    {
+        const j = Math.floor(Math.random() * i);
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
+// 正誤チェック
+const checkAnswer = () => {
+    const words = document.getElementById("answer").children;
+    let answer = "";
+
+    // 単語数分ループする
+    for ( const word of words )
+    {
+        // 並べ替えた単語をつなげる
+        answer += word.innerText + " ";
+    }
+
+    const last = sentence[qno][0].slice(-1);
+    let check = "ng";
+
+    // 問題の英訳と同じなら正解
+    if ( answer.replace(` ${last} `, last) == sentence[qno][0] )
+    {
+        check = "ok";
+        speechSentence();
+        if ( qno < sentence.length - 1 )
+        {
+            // 問題がまだあるなら「次の問題」ボタンを有効化する
+            document.getElementById("next").disabled = false;
+        }
+    }
+
+    setStyle(words, "remove", "ok", "ng");
+    setStyle(words, "add", check);
+}
+
+// 解答欄をリセット
+const resetAnswer = () => {
+    setStyle(document.getElementById("select").children, "remove", "select");
+    const answers = document.getElementById("answer").children;
+    setStyle(answers, "remove", "ok", "ng");
+
+    for (let i = 0; i < answers.length-1; i++)
+    {
+        answers[i].classList.remove("set");
+        answers[i].classList.add("reset");
+        answers[i].innerHTML = "("+(i+1)+")";
+    }
+}
+
+// 英文を発声する
+const speechSentence = () => {
+    // 発生中の音声を停止
+    window.speechSynthesis.cancel();
+
+    // スピーチオブジェクトを作成
+    const utterance = new SpeechSynthesisUtterance();
+    utterance.text = sentence[qno][0];  // 発声するテキストを設定
+    utterance.lang = "en-US";           // 言語をアメリカ英語にする
+    // utterance.text = sentence[qno][1];  // 発声するテキストを設定
+    // utterance.lang = "jp-JP";           // 言語を日本語にする
+
+    // 設定したテキストを発声する
+    window.speechSynthesis.speak(utterance);
+}
+
+// 次の問題
+const nextQuestion = () => {
+    qno++;
+    setQuestion();
+    document.getElementById("num").innerText = `${qno+1}/${sentence.length}`;
+}
+
+</script>
+<style>
+div { height: 60px; }
+div span {
+    margin: 5px;
+    padding: 10px 10px;
+    border: thin solid #0000cc;
+    cursor: pointer;
+}
+
+.set {
+    color: #000000;
+    background-color: #CCFFFF;
+}
+
+.reset { color: #9999FF; }
+.ok { background-color: #CCFFCC; }
+.ng { background-color: #ffcccc; }
+.select { background-color: #99CCFF; }
+</style>
+</head>
+<body onload="init()">
+<p>英文並び替え</p>
+<input type="button" value="はじめから" onclick="init()">   <!--はじめからボタン-->
+<input type="button" id="next" value="次の問題" onclick="nextQuestion()">   <!--次の問題ボタン-->
+<span id="num">1/10</span>  <!--問題番号-->
+<ht>
+<div id="question"></div>
+<div id="select"></div>
+<div>↓ 正しい順に並び替えてください。</div>
+<div id="answer"></div>
+</ht>
+<input type="button" value="リセット" onclick="resetAnswer()">
+<input type="button" value="判定" onclick="checkAnswer()">
+<input type="button" value="ヒント" onclick="speechSentence()">
+</body>
+</html>

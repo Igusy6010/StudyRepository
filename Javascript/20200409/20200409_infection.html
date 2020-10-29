@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>感染シミュレーション</title>
+<script>
+
+let chanvas, context;           // 人の移動用キャンバス
+let graphCanvas, GraphContext;  // グラフ用キャンバス
+let persons = new Array();      // 人
+let elapsedTime;                // 経過時間
+let timer = null;              // タイマー
+
+let xPerson = 20;
+let yPerson = 20;
+
+// 人クラス
+class Person {
+    constructor(status) {
+        this.x = 0;             // 位置
+        this.y = 0;
+        this.r = 10;            // 半径
+        this.v = 0;             // 移動速度
+        this.angle = 0;         // 移動方向
+        this.status = status;   // 陰性=negative / 陽性=positive
+    }
+    move () {
+        // 移動
+        this.x += this.v * Math.cos(this.angle);
+        this.y += this.v * Math.sin(this.angle);
+        
+        // 跳ね返り
+        if ( (this.x < this.r) || (this.x > canvas.width - this.r) ) {
+            this.angle = Math.PI - this.angle;  // x座標が画面端なら、横方向に反転する
+
+            // 画面からのはみ出し調整
+            if ( this.x < this.r ) {
+                this.x = this.r;
+            }
+            if ( this.x > canvas.width - this.r ) {
+                this.x = canvas.width - this.r;
+            }
+        }
+        if ( (this.y < this.r) || (this.y > canvas.height - this.r) ) {
+            this.angle = Math.PI * 2 - this.angle; // 縦方向に反転する
+
+            if ( this.y < this.r ) {
+                this.y = this.r;
+            }
+            if (this.y > canvas.height - this.r) {
+                this.y = canvas.height - this.r;
+            }
+        }
+    }
+    collide(target) {
+        // 接触
+        const dx = target.x - this.x;
+        const dy = target.y - this.y;
+        const d = (dx ** 2 + dy ** 2) ** 0.5;
+        if ( d < this.r * 2 ) {
+            // 感染
+            if ( this.status == "positive" ) {
+                target.status = "positive";
+            }
+            if ( target.status == "positive" ) {
+                this.status = "positive";
+            }
+
+            // 移動方向を変える
+            target.angle = Math.atan2(dy, dx);
+            this.angle = Math.PI - this.angle + target.angle * 2;   // 跳ね返る方向
+            if ( (this.v > 0) && (target.v > 0) ) {
+                this.v = (target.v + this.v) / 2;
+                target.v = this.v;
+            }
+            this.move();
+            target.move();
+        }
+    }
+    draw() {
+        // 描画
+        context.strokeStyle = "#666666";    // 線の色をグレー
+
+        // 陰性なら黄緑、陽性なら濃いピンク
+        context.fillStyle = "#66FF66";
+        if ( this.status == "positive" ) {
+            context.fillStyle = "#FF6666";
+        }
+        context.beginPath();
+        context.arc(this.x, this.y, this.r, 0, Math.PI * 2);    // 半径rの円を描く
+        context.fill();
+        context.stroke();
+    }
+}
+
+const init = () => {
+    // キャンバスの取得
+    canvas = document.getElementById("city");   // 人描画用キャンバスを取得
+    context = canvas.getContext("2d");
+    graphCanvas = document.getElementById("graph");
+    graphContext = graphCanvas.getContext("2d");
+    initCanvas();
+}
+
+const initCanvas = () => {
+    // キャンバスの初期化
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    graphContext.clearRect(0, 0, graphCanvas.width, graphCanvas.height);
+
+    // 目盛り線の描画
+    graphContext.strokeStyle = "#6666FF";
+    graphContext.beginPath();
+    graphContext.moveTo(0, graphCanvas.height / 2);
+    graphContext.lineTo(graphCanvas.width, graphCanvas.height / 2);
+    graphContext.stroke();
+
+    // 人の生成
+    persons = [];
+    const num = document.getElementById("num").value;   // 移動人数を取得
+    for ( let i = 0; i < xPerson * yPerson; i++ ) {
+        const person = new Person("negative");
+        if ( i == 0 ) {
+            person.status = "positive";
+        }
+        if ( i < num ) {
+            person.v = 1;
+            person.angle = Math.random() * Math.PI * 2;
+        }
+        persons.push(person);
+    }
+    // シャッフル
+    for ( let i = persons.length - 1; i > 0; i-- ) {
+        let j = Math.floor(Math.random() * i);
+        [persons[i], persons[j]] = [persons[j], persons[i]];
+    }
+    // 配置
+    for ( let y = 0; y < yPerson; y++ ){
+        for ( let x = 0; x < xPerson; x++ ) {
+            const index = x + y * yPerson;
+            persons[index].x = x * 30 + 15;
+            persons[index].y = y * 30 + 15;
+            persons[index].draw();
+        }
+    }
+}
+
+const startSimulation = () => {
+    // 初期化
+    initCanvas();
+
+    // シミュレーションの開始
+    elapsedTime = 0;
+    if ( timer != null ) {
+        clearInterval(timer);   // タイマーをクリア
+    }
+    timer = setInterval(simulate, 20);  // 20秒ごとにsimurate関数を実行する
+}
+
+const simulate = () => {
+    // 人の移動
+    for (const person of persons) {
+        person.move();
+
+        // 接触
+        for (const target of persons) {
+            if ( person != target ) {
+                person.collide(target); // 他の人との当たり判定
+            }
+        }
+    }
+
+    // 人の描画、感染者数のカウント
+    let cnt = 0;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    for ( const person of persons ) {
+        person.draw();
+        if ( person.status == "positive" ) {
+            cnt++; // 陽性の人を数える
+        }
+    }
+
+    // 感染者数グラフの描画
+    graphContext.strokeStyle = "#FF6666";
+    graphContext.beginPath();
+    graphContext.moveTo(elapsedTime, graphCanvas.height);
+    graphContext.lineTo(elapsedTime, graphCanvas.height - (cnt / (xPerson * yPerson / 100)));
+    graphContext.stroke();
+
+    // 経過時間を更新
+    elapsedTime++;
+    
+    // シミュレーション終了
+    if ( elapsedTime > 600 ) {
+        clearInterval(timer);
+        timer = null;
+    }
+}
+</script>
+<style>
+/*キャンバスの枠線の色*/
+canvas { border: thin solid #333333; }
+</style>
+</head>
+<body onload="init()">
+<p>感染シミュレーション</p>
+<!--移動人数設定スライダー-->
+移動人数:<input type="range" id="num" min="1" max="400" value="400">
+<!--スタートボタン-->
+<input type="button" value="スタート" onclick="startSimulation()">
+<hr>
+<!--グラフ用キャンバス-->
+<canvas id="graph" width="600" height="100"></canvas><br>
+<!--人描画用キャンバス-->
+<canvas id="city" width="600" height="600"></canvas>
+</body>
+</html>
