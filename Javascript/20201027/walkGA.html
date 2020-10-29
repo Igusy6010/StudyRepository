@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>歩行進化</title>
+<!--Box2D.jsライブラリを読み込む-->
+<!-- <script src="Box2D.js"></script> -->
+<script src="https://rawgit.com/phi-jp/box2dweb/master/Box2D.js"></script>
+<!-- <script src="http://cdn.rawgit.com/phi-jp/phina.js/v0.2.1/build/phina.js"></script> -->
+<script>
+// 物理ワールド、物体、形状の定義
+let world, bodyDef, fixDef;
+
+// 縮尺
+const scale = 5;
+
+// 幅、高さ
+const w = 600/scale, h = 600/scale;
+
+// 物体(体、脚、ジョイント)
+let creature = new Array();
+
+// 個体({gene:遺伝子, fitness:適応度})
+let individual = new Array();
+
+// 個体数、遺伝子数
+const num = 10, geneNum = 20;
+
+// この戦闘位置、遺伝子の位置
+let s = 0, index = 0;
+
+// 世代、最高記録(距離、世代)
+let t = 1, f1 = 0, t1 = 0;
+
+// カウンタ、タイマー
+let cnt = 0, timer;
+
+// インターバル、繰り返し回数
+const interval = 30, loop = 3;
+
+// 2Dベクトル
+const b2Vec2 = Box2D.Common.Math.b2Vec2;
+
+const init = () => {
+    // 物理ワールド、物体、形状の定義
+    world = new Box2D.Dynamics.b2World(new b2Vec2(0, 9.8), true);   // b2Vec2(0, 9.8) が重力
+    bodyDef = new Box2D.Dynamics.b2BodyDef;
+    fixDef = new Box2D.Dynamics.b2FixtureDef;
+    [fixDef.density, fixDef.friction, fixDef.restitution] = [0.1, 1, 0.5];  // 密度、摩擦係数、反発係数
+
+    // 初期化
+    for (let i = 0; i < num; i++ ) {    // 個体数(10)分だけ繰り返し
+        // 地面の作成
+        if ( i == 0) {
+            setBox(w / 2, 0, w, 0.1);
+        }
+        setBox(w/2, h/num*(i+1), w, 0.1);
+
+        // 遺伝子の作成
+        const gene = new Array();
+        for ( let j = 0; j < geneNum; j++ ) {   // 遺伝子数(20)分だけ繰り返し
+            gene[j] = Math.random() * 10 - 5;
+        }
+        individual.push({"gene":gene, "fitness":0});    // 遺伝子の配列と適応度(初期値0)をセット
+    }
+    initCreatures();
+
+    // 描画設定
+    const debugDraw = new Box2D.Dynamics.b2DebugDraw(); // デバッグ描画を作成
+    debugDraw.SetSprite(document.getElementById("field").getContext("2d")); // キャンバスを取得
+    debugDraw.SetDrawScale(scale);
+    debugDraw.SetFillAlpha(0.5);
+    debugDraw.SetFlags(Box2D.Dynamics.b2DebugDraw.e_shapeBit);  // デバッグ描画で形状を書く
+    world.SetDebugDraw(debugDraw);
+
+    // 第1世代開始
+    timer = setInterval(update, 1000/60);   // 1/60毎に更新する
+    document.getElementById("button").disabled = true;  // 次の世代へボタンを無効化
+}
+
+// 生物の初期化
+const initCreatures = () => {
+    for (let i = 0; i < num; i++ ) {
+        if (creature[i]) {
+            world.DestroyBody(creature[i][0]);
+            world.DestroyBody(creature[i][1]);
+            world.DestroyBody(creature[i][2]);
+        }
+        // 生物のy座標
+        const y = h / num * ( i + 1 ) - 5;
+
+        // 生物の体と脚を四角形で作成
+        const body = setBox(10, y, 6, 1, true);
+        const legL = setBox(5, y+2, 1, 3, true);
+        const legR = setBox(15, y+2, 1, 3, true);
+
+        // 生物の体と脚の接続と回転軸の設定
+        const jointL = setJoint(body, legL, 5, y, -Math.PI/6, Math.PI/6);
+        const jointR = setJoint(body, legR, 15, y, -Math.PI/6, Math.PI/6);
+
+        creature[i] = [body, legL, legR, jointL, jointR];
+    }
+}
+
+// ボックスの作成
+const setBox = (x, y, width, height, dynamic = false) => {
+    bodyDef.type = Box2D.Dynamics.b2Body.b2_staticBody;
+    if ( dynamic ) {
+        // 引数dynamicがtrueなら動的オブジェクト、falseなら静的オブジェクト
+        bodyDef.type = Box2D.Dynamics.b2Body.b2_dynamicBody;
+    }
+
+    // 形状は、横幅x2、高さx3の四角形
+    fixDef.shape = new Box2D.Collision.Shapes.b2PolygonShape;
+    fixDef.shape.SetAsBox(width, height);
+
+    const box = world.CreateBody(bodyDef);
+    box.CreateFixture(fixDef);
+    box.SetPosition(new b2Vec2(x,y));   // 四角形の中心座標
+    return box;
+}
+
+// ジョイントの作成
+const setJoint = (object1, object2, x, y, angle1, angle2) => {
+    const jointDef = new Box2D.Dynamics.Joints.b2RevoluteJointDef();
+    jointDef.Initialize(object1, object2, new b2Vec2(x, y));    // 2つのオブジェクトを回転軸(x,y)で接続
+    [jointDef.lowerAngle, jointDef.upperAngle] = [angle1, angle2];  // 可動範囲の最小値と最大値
+    jointDef.enableLimit = true;
+    
+    // モーターを有効にし、回転の強さを1000にする
+    jointDef.enableMotor = true;
+    jointDef.maxMotorTorque = 1000;
+
+    const joint = world.CreateJoint(jointDef);
+    return joint;
+}
+
+// 物理ワールドを更新
+const update = () => {
+    // 1/60毎に物理ワールドを更新
+    world.Step(1/60, 10, 10);
+    // デバッグ描画
+    world.DrawDebugData();
+    // 物理ワールド内の力をクリア
+    world.ClearForces();
+    // 歩行
+    cnt++;
+
+    // 30フレームごと
+    if (cnt%interval == 0) {
+        for (let i = 0; i < num; i++ ) {
+            // 脚へ遺伝子に応じた回転を与える
+            const lr = index % 2 + 3;
+            creature[i][lr].SetMotorSpeed(individual[s+i].gene[index]);
+        }
+        index++;
+        if ( index == geneNum ) {
+            index = 0;
+        }
+        // 全固体が60歩ずつ歩いたときture
+        if ( cnt > interval * geneNum * loop ) {
+            clearInterval(timer);
+            document.getElementById("button").disabled = false;
+            selection();    // 淘汰
+        }
+    }
+}
+
+// 世代の更新
+const next = () => {
+    // 子を作成
+    crossover();
+    [s, t, cnt, index] = [num, t+1, 0, 0];
+
+    // 世代を表示
+    document.getElementById("t").innerText = t;
+    initCreatures();
+    timer = setInterval(update, 1000/60);
+    document.getElementById("button").disabled = true;
+}
+
+const selection = () => {
+    // 評価
+    for ( let i = s; i < s + num; i++ ) {
+        // 進んだ位置を適応度にセット
+        individual[i].fitness = creature[i-s][0].GetPosition().x;
+    }
+
+    // 淘汰
+    individual.sort((a, b) => { return b.fitness - a.fitness;});    // 適応度の高い順位並べ替え
+    individual.splice(num); // 適応度の低い10個を破棄
+
+    // 最高記録
+    if ( f1 < individual[0].fitness ) {
+        [f1, t1] = [individual[0].fitness, t];
+    }
+    document.getElementById("score").innerText = `${f1.toFixed(2)}m`;
+    document.getElementById("score").innerText += `(第${t1}世代)`;  // 表示
+}
+
+// 2点交差
+const crossover = () => {
+    for ( let i = 0; i < num; i += 2 ) { // 個体を2個ずつ取り出す
+        // 切断箇所
+        const p0 = Math.floor(Math.random() * (geneNum - 3)) + 1;   // 1～17の乱数
+        const p1 = Math.floor(Math.random() * (geneNum - p0 - 2)) + 1;  // 1～18-p0 の間の乱数
+
+        // 子の遺伝子を作成
+        let childGene0 = individual[i].gene.concat();   // 遺伝子をコピーして個を作る
+        let childGene1 = individual[i+1].gene.concat();
+        const gene02 = childGene0.slice(p0+p1); // 子0の配列を乱数の位置で3分割
+        const gene01 = childGene0.slice(p0, p0+p1);
+        const gene00 = childGene0.slice(0, p0);
+        const gene12 = childGene1.slice(p0+p1); // 子1の配列を乱数の位置で3分割
+        const gene11 = childGene1.slice(p0, p0+p1);
+        const gene10 = childGene1.slice(0, p0);
+        childGene0 = gene00.concat(gene11, gene02); // 子0と子1を三分割した真ん中の部分を入れ替える
+        childGene1 = gene10.concat(gene01, gene12);
+
+        // 突然変異
+        mutation(childGene0);
+        mutation(childGene1);
+
+        // 子の追加
+        individual.push({"gene":childGene0, "fitness":0});
+        individual.push({"gene":childGene1, "fitness":0});
+    }
+}
+
+// 突然変異
+const mutation = gene => {
+    // 突然変異の確率は10%
+    if (Math.floor(Math.random() * 100 < 10)) {
+        // 0～19の間の乱数
+        const p = Math.floor(Math.random() * geneNum);
+
+        // p番目の遺伝子を-5～5の間の乱数にする
+        gene[p] = Math.random() * 10 -5;
+    }
+}
+</script>
+</head>
+<body onload="init()">
+<p>歩行進化</p>
+<input type="button" id="button" value="次の世代へ" onclick="next()">
+第<span id="t">1</span>世代  最高記録:<span id="score">---m</span><hr>
+<canvas id="field" width="600" height="600"></canvas>
+</body>
+</html>
