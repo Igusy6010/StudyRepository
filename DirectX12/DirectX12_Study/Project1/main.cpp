@@ -32,13 +32,20 @@ ID3D12CommandQueue* _cmdQueue = nullptr;
 // ディスクリプタヒープ
 ID3D12DescriptorHeap* _rtvHeaps = nullptr;
 
+// バックバッファー
+vector<ID3D12Resource*> _backBuffers;
+
 
 /// <summary>
 /// DirectX12 を初期化 
 /// </summary>
 void InitializeDirectX12(HWND hwnd)
 {
+#ifdef _DEBUG
+	auto result = CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&_dxgiFactory));
+#else
 	auto result = CreateDXGIFactory1(IID_PPV_ARGS(&_dxgiFactory));
+#endif
 
 	// アダプターの列挙用
 	vector<IDXGIAdapter*> adapters;
@@ -76,7 +83,6 @@ void InitializeDirectX12(HWND hwnd)
 
 	// Direct3D デバイスの初期化
 	D3D_FEATURE_LEVEL featureLevel;
-
 	for (auto lv : levels)
 	{
 		if (D3D12CreateDevice(tmpAdapter, lv, IID_PPV_ARGS(&_dev)) == S_OK)
@@ -85,6 +91,13 @@ void InitializeDirectX12(HWND hwnd)
 			break;	// 生成可能なバージョンが見つかったループを打ち切る
 		}
 	}
+
+	// アダプターの初期化
+	for (auto adapter : adapters)
+	{
+		adapter->Release();
+	}
+	vector<IDXGIAdapter*>().swap(adapters);
 
 	if (!_dev)
 	{
@@ -177,6 +190,7 @@ void InitializeDirectX12(HWND hwnd)
 		PostQuitMessage(0);
 	}
 
+	// スワップチェーン
 	DXGI_SWAP_CHAIN_DESC swcDesc = {};
 	result = _swapchain->GetDesc(&swcDesc);
 	if (result != S_OK)
@@ -185,9 +199,10 @@ void InitializeDirectX12(HWND hwnd)
 		PostQuitMessage(0);
 	}
 
-	vector<ID3D12Resource*> _backBuffers(swcDesc.BufferCount);
+	// バックバッファー作成
+	_backBuffers.resize(swcDesc.BufferCount);
 	D3D12_CPU_DESCRIPTOR_HANDLE handle = _rtvHeaps->GetCPUDescriptorHandleForHeapStart();	// 先頭のアドレスを取得する
-	for (int idx = 0; idx < swcDesc.BufferCount; ++idx)
+	for (unsigned int idx = 0; idx < swcDesc.BufferCount; ++idx)
 	{
 		// スワップチェーン内のバッファーとビューの関連付け
 		result = _swapchain->GetBuffer(idx, IID_PPV_ARGS(&_backBuffers[idx]));
@@ -203,7 +218,6 @@ void InitializeDirectX12(HWND hwnd)
 		// ポインターをずらす
 		handle.ptr += _dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 	}
-
 }
 
 /// <summary>
@@ -239,6 +253,15 @@ LRESULT WindowProcedure(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 		return 0;
 	}
 	return DefWindowProc(hwnd, msg, wparam, lparam);
+}
+
+void EnableDebugLayer()
+{
+	ID3D12Debug* debugLayer = nullptr;
+	auto result = D3D12GetDebugInterface(IID_PPV_ARGS(&debugLayer));
+
+	debugLayer->EnableDebugLayer();	// デバッグレイヤーを有効にする
+	debugLayer->Release();	// 有効化したらインターフェイスを解放する
 }
 
 /// <summary>
@@ -289,32 +312,49 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		nullptr					// 追加パラメーター
 		);
 
+#ifdef _DEBUG
+	// デバッグレイヤーをオンに
+	EnableDebugLayer();
+#endif
+
 	// DirectX12の初期化
 	InitializeDirectX12(hwnd);
+
+	// フェンス初期化
+	ID3D12Fence* _fence = nullptr;
+	UINT64 _fenceVal = 0;
+	auto result = _dev->CreateFence(_fenceVal, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_fence));
 
 	// ウィンドウの表示
 	ShowWindow(hwnd, SW_SHOW);
 
 	// 1フレームで行うべき処理たち
 	{
-		auto result = _cmdAllocator->Reset();
-		//if (result != S_OK)
-		//{
-		//	// Reset に失敗したら、アプリケーションを終了させる
-		//	PostQuitMessage(0);
-		//}
-
 		auto bbIdx = _swapchain->GetCurrentBackBufferIndex();
 
+		// リソースバリアを設定する
+		D3D12_RESOURCE_BARRIER BarrierDesc = {};
+		BarrierDesc.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;	// 遷移
+		BarrierDesc.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;	// 特に指定なし
+		BarrierDesc.Transition.pResource = _backBuffers[bbIdx];	// バックバッファーリソース
+		BarrierDesc.Transition.Subresource = 0;
+
+		BarrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;	// 直前はPRESENT状態
+		BarrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;	// 今からレンダーターゲット状態
+		_cmdList->ResourceBarrier(1, &BarrierDesc);	// バリア指定実行
+
+		// レンダーターゲットを設定
 		auto rtvH = _rtvHeaps->GetCPUDescriptorHandleForHeapStart();
 		rtvH.ptr += bbIdx * _dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-
 		_cmdList->OMSetRenderTargets(1, &rtvH, true, nullptr);
 
 		// 画面クリア
 		float clearColor[] = { 1.0f, 1.0f, 0.0f, 1.0f }; // 黄色
-
 		_cmdList->ClearRenderTargetView(rtvH, clearColor, 0, nullptr);
+
+		BarrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+		BarrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+		_cmdList->ResourceBarrier(1, &BarrierDesc);	// バリア指定実行
 
 		// 命令のクローズ
 		_cmdList->Close();
@@ -323,13 +363,34 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		ID3D12CommandList* cmdLists[] = { _cmdList };
 		_cmdQueue->ExecuteCommandLists(1, cmdLists);
 
+		// コマンドの完了待ち
+		_cmdQueue->Signal(_fence, ++_fenceVal);
+
+		//while (_fence->GetCompletedValue() != _fenceVal)
+		//{
+		//	;	// ビジーループ
+		//}
+		// ビジーループを使わない方法
+		if (_fence->GetCompletedValue() != _fenceVal)
+		{
+			// イベントハンドルの取得
+			auto event = CreateEvent(nullptr, false, false, nullptr);
+
+			_fence->SetEventOnCompletion(_fenceVal, event);
+
+			// イベントが発生するまで待ち続ける(INFINITE)
+			WaitForSingleObject(event, INFINITE);
+
+			// イベントハンドルを閉じる
+			CloseHandle(event);
+		}
+
 		_cmdAllocator->Reset();	// キューをクリア
 		_cmdList->Reset(_cmdAllocator, nullptr);	// 再びコマンドリストを溜める準備
 
 		// フリップ
 		_swapchain->Present(1, 0);
 	}
-
 
 	MSG msg = {};
 	while (true)
@@ -349,6 +410,40 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
 	// もうクラスは使わないので登録を解除する
 	UnregisterClass(w.lpszClassName, w.hInstance);
+
+	for (auto backBuffer : _backBuffers)
+	{
+		backBuffer->Release();
+	}
+	vector<ID3D12Resource*>().swap(_backBuffers);
+
+	if (_fence)
+	{
+		_fence->Release();
+	}
+
+	if (_cmdAllocator)
+	{
+		_cmdAllocator->Release();
+	}
+	if (_cmdList)
+	{
+		_cmdList->Release();
+	}
+	if (_cmdQueue)
+	{
+		_cmdQueue->Release();
+	}
+
+	if (_rtvHeaps)
+	{
+		_rtvHeaps->Release();
+	}
+
+	_swapchain->Release();
+	_dxgiFactory->Release();
+	_dev->Release();
+
 
 	return 0;
 }
